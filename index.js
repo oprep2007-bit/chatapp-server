@@ -27,6 +27,7 @@ const messages = {};
 const onlineUsers = {};
 const lastSeen = {};
 const profiles = {};
+const statuses = {};
 
 app.post('/register', async (req, res) => {
   const { username, password } = req.body;
@@ -50,6 +51,49 @@ app.get('/users', (req, res) => {
 });
 
 app.get('/lastseen', (req, res) => res.json(lastSeen));
+
+app.get('/statuses', (req, res) => {
+  const now = Date.now();
+  const active = {};
+  for (const user in statuses) {
+    active[user] = statuses[user].filter(s => now - s.time < 86400000);
+    if (active[user].length === 0) delete active[user];
+  }
+  res.json(active);
+});
+
+app.post('/status', async (req, res) => {
+  try {
+    const { username, text, color } = req.body;
+    let mediaUrl = null, mediaType = null;
+    if (req.files && req.files.media) {
+      const file = req.files.media;
+      const isVideo = file.mimetype.startsWith('video/');
+      const resourceType = isVideo ? 'video' : 'image';
+      const b64 = file.data.toString('base64');
+      const dataUri = `data:${file.mimetype};base64,${b64}`;
+      const result = await cloudinary.uploader.upload(dataUri, { resource_type: resourceType, folder: 'chatapp/statuses' });
+      mediaUrl = result.secure_url;
+      mediaType = resourceType;
+    }
+    if (!statuses[username]) statuses[username] = [];
+    const status = { id: Date.now().toString(), username, text: text || '', color: color || '#075e54', mediaUrl, mediaType, time: Date.now(), views: [] };
+    statuses[username].push(status);
+    io.emit('new_status', { username, status });
+    res.json({ success: true, status });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/status/view', (req, res) => {
+  const { statusId, username, viewer } = req.body;
+  if (statuses[username]) {
+    const s = statuses[username].find(s => s.id === statusId);
+    if (s && !s.views.includes(viewer)) s.views.push(viewer);
+  }
+  res.json({ success: true });
+});
 
 app.post('/upload', async (req, res) => {
   try {
